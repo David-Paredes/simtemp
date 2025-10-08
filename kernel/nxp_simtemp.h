@@ -13,6 +13,8 @@
 #include <linux/wait.h>
 #include <linux/overflow.h>
 #include <linux/random.h>
+#include <linux/mutex.h>
+#include <linux/spinlock.h>
 
 #define DEVICE_NAME "simtemp"
 /* Flag masks */
@@ -50,6 +52,10 @@ static struct simtemp_config simtemp_dt = {
     .threshold_mC = 45000,
     .mode = RAMP_MODE
 };
+/******************************* Locks ***********************************************/
+static DEFINE_RAW_SPINLOCK(simtemp_spin_lock);
+static DEFINE_MUTEX(simtemp_config_mutex);
+/***************************** Locks end *********************************************/
 
 /********************* Read, epoll and queue read ************************************/
 static wait_queue_head_t simtemp_wait_queue;
@@ -95,7 +101,7 @@ static ssize_t simtemp_threshold_store(struct device *dev, struct device_attribu
 static ssize_t simtemp_mode_show(struct device *dev, struct device_attribute *attr, char *buf);
 
 /* Store function for simtemp_dt.mode */
-static ssize_t simtemp_show_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
+static ssize_t simtemp_mode_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
 
 /* Attribute definition */
 static DEVICE_ATTR_RW(simtemp_sampling);

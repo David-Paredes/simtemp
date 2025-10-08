@@ -6,6 +6,7 @@ static void __exit nxp_simtemp_exit(void)
     /* remove device files */
     device_remove_file(simtemp_misc_device.this_device, &dev_attr_simtemp_sampling);
     device_remove_file(simtemp_misc_device.this_device, &dev_attr_simtemp_threshold);
+    device_remove_file(simtemp_misc_device.this_device, &dev_attr_simtemp_mode);
     
     /* Deregister misc device */
     misc_deregister(&simtemp_misc_device);
@@ -38,13 +39,19 @@ static int __init nxp_simtemp_init(void)
     ret = device_create_file(simtemp_misc_device.this_device, &dev_attr_simtemp_sampling);
     if(ret){
         device_remove_file(simtemp_misc_device.this_device, &dev_attr_simtemp_sampling);
-        printk("nxp_simtemp: Failed to register misc device sampling_ms\n");
+        printk("nxp_simtemp: Failed to register misc device file sampling_ms\n");
         return ret;
     }
     ret = device_create_file(simtemp_misc_device.this_device, &dev_attr_simtemp_threshold);
     if(ret){
         device_remove_file(simtemp_misc_device.this_device, &dev_attr_simtemp_threshold);
-        printk("nxp_simtemp: Failed to register misc device threshold_mC\n");
+        printk("nxp_simtemp: Failed to register misc device file threshold_mC\n");
+        return ret;
+    }
+    ret = device_create_file(simtemp_misc_device.this_device, &dev_attr_simtemp_mode);
+    if(ret){
+        device_remove_file(simtemp_misc_device.this_device, &dev_attr_simtemp_mode);
+        printk("nxp_simtemp: Failed to register misc device file mode\n");
         return ret;
     }
 
@@ -60,6 +67,11 @@ static int __init nxp_simtemp_init(void)
 
 enum hrtimer_restart sample_hrtimer_callback(struct hrtimer *timer)
 {
+    unsigned long flags;
+    
+    /* Acquire the spinlock with interrups disabled */
+    raw_spin_lock_irqsave(&simtemp_spin_lock, flags);
+
     /* increment temperature */
     switch(simtemp_dt.mode)
     {
@@ -75,6 +87,9 @@ enum hrtimer_restart sample_hrtimer_callback(struct hrtimer *timer)
         simtemp_sample.temp_mC = generate_noisy_temp(simtemp_sample.temp_mC);
         break;
     }
+
+    /* Release the spinlock and restore de interrupt state */
+    raw_spin_unlock_irqrestore(&simtemp_spin_lock, flags);
 
     /* get time stamp */
     simtemp_sample.timestamp_ns = ktime_get_ns();
@@ -106,6 +121,7 @@ enum hrtimer_restart sample_hrtimer_callback(struct hrtimer *timer)
 static ssize_t simtemp_sample_read(struct file *file, char __user *buffer, size_t len, loff_t *offset)
 {
     int ret;
+    unsigned long flags;
     bool new_sample_available = (simtemp_sample.flags & NEW_SAMPLE_ON) || (simtemp_sample.flags & THRESHOLD_CROSSED_ON);
 
     /* Block process if new sample is not availble */
@@ -120,8 +136,15 @@ static ssize_t simtemp_sample_read(struct file *file, char __user *buffer, size_
         }
     }
 
+    /* Acquire the spinlock with interrups disabled */
+    raw_spin_lock_irqsave(&simtemp_spin_lock, flags);
+
     /* Copy the data to user space */
     ret = copy_to_user(buffer, &simtemp_sample, sizeof(simtemp_sample));
+
+    /* Release the spinlock and restore de interrupt state */
+    raw_spin_unlock_irqrestore(&simtemp_spin_lock, flags);
+
     if(ret){
         return -EFAULT;
     }
@@ -155,7 +178,11 @@ static unsigned int simtemp_sample_poll(struct file *file, struct poll_table_str
 /* Show function for simtemp_dt.sampling_ms */
 static ssize_t simtemp_sampling_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    int ret = sprintf(buf, "%d\n", simtemp_dt.sampling_ms);
+    int ret;
+    mutex_lock(&simtemp_config_mutex);
+    ret = sprintf(buf, "%d\n", simtemp_dt.sampling_ms);
+    mutex_unlock(&simtemp_config_mutex);
+
     return ret;
 }
 
@@ -166,14 +193,22 @@ static ssize_t simtemp_sampling_store(struct device *dev, struct device_attribut
     if(kstrtoint(buf, 10, &val)){
         return -EINVAL;
     }
+
+    mutex_lock(&simtemp_config_mutex);
     simtemp_dt.sampling_ms = val;
+    mutex_unlock(&simtemp_config_mutex);
+
     return count;
 }
 
 /* Show function for simtemp_dt.threshold_mC */
 static ssize_t simtemp_threshold_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    int ret = sprintf(buf, "%d\n", simtemp_dt.threshold_mC);
+    int ret;
+    mutex_lock(&simtemp_config_mutex);
+    ret = sprintf(buf, "%d\n", simtemp_dt.threshold_mC);
+    mutex_unlock(&simtemp_config_mutex);
+
     return ret;
 }
 
@@ -184,25 +219,37 @@ static ssize_t simtemp_threshold_store(struct device *dev, struct device_attribu
     if(kstrtoint(buf, 10, &val)){
         return -EINVAL;
     }
+
+    mutex_lock(&simtemp_config_mutex);
     simtemp_dt.threshold_mC = val;
+    mutex_unlock(&simtemp_config_mutex);
+
     return count;
 }
 
 /* Show function for simtemp_dt.mode */
 static ssize_t simtemp_mode_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    int ret = sprintf(buf, "%d\n", simtemp_dt.mode);
+    int ret;
+    mutex_lock(&simtemp_config_mutex);
+    ret = sprintf(buf, "%d\n", simtemp_dt.mode);
+    mutex_unlock(&simtemp_config_mutex);
+
     return ret;
 }
 
 /* Store function for simtemp_dt.mode */
-static ssize_t simtemp_show_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t simtemp_mode_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
     int val;
     if(kstrtoint(buf, 10, &val)){
         return -EINVAL;
     }
+
+    mutex_lock(&simtemp_config_mutex);
     simtemp_dt.mode = val;
+    mutex_unlock(&simtemp_config_mutex);
+
     return count;
 }
 
