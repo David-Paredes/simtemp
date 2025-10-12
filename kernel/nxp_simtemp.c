@@ -122,7 +122,7 @@ static ssize_t simtemp_sample_read(struct file *file, char __user *buffer, size_
 {
     int ret;
     unsigned long flags;
-    bool new_sample_available = (simtemp_sample.flags & NEW_SAMPLE_ON) || (simtemp_sample.flags & THRESHOLD_CROSSED_ON);
+    bool new_sample_available = simtemp_sample.flags & NEW_SAMPLE_ON;
 
     /* Block process if new sample is not availble */
     if(!new_sample_available)
@@ -166,7 +166,7 @@ static unsigned int simtemp_sample_poll(struct file *file, struct poll_table_str
     poll_wait(file, &simtemp_wait_queue, poll_table);
 
     /* Check if new sample is available */
-    if((simtemp_sample.flags & NEW_SAMPLE_ON) || (simtemp_sample.flags & THRESHOLD_CROSSED_ON))
+    if(simtemp_sample.flags & NEW_SAMPLE_ON)
     {
         /* Data is ready to read */
         mask |= POLLIN | POLLRDNORM;

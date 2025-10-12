@@ -9,7 +9,7 @@ import datetime
 import errno
 import threading
 
-write_regex= r"^(Write)\s(\w+)\s(\d+)"
+write_regex= r"^(write)\s+(\w+)\s+(\d+)"
 
 #constants for paths
 SYSFS_PATH = '/sys/class/misc/simtemp/'
@@ -200,10 +200,13 @@ def main():
                     command = input("Enter a command ('exit' to stop): ")
                     if command.lower() == "exit":
                         stop_event.set()
-                    regex_match = re.findall(write_regex, command.lower())
-                    if regex_match[1] == "write":
-                        write_config(CONFIG_PATHS[regex_match[2]], regex_match[3])
-                        if(regex_match[2] == "mode"):
+                    regex_match = re.match(write_regex, command.lower())
+                    if regex_match:
+                        input_cmd, input_config, input_value = regex_match.groups()
+                    print(f"Received {input_cmd}, {input_config} and {input_value}")
+                    if input_cmd == "write":
+                        write_config(CONFIG_PATHS[input_config], input_value)
+                        if(input_config == "mode"):
                             print("Mode changed")
                 except EOFError:
                     #handle cases where input stream is closed. e.g. in automated tests
@@ -215,7 +218,7 @@ def main():
             print("\nMain thread received Ctrl+c. Stopping...")
             stop_event.set()
         except Exception as e:
-            print("Main thread caught error: {e}")
+            print(f"Main thread caught error: {e}")
             stop_event.set()
         finally:
             # Wait for threads to finish ther cleanup
@@ -265,21 +268,22 @@ def main():
         write_config(CONFIG_PATHS["threshold_mc"], 24990) # Change threshold to 24.99°C (below mean of 25°C)
         count = print_sample_test(3, ep, fd)
         if(count <= 3):
-            print(f"T3: Passed. Samples: {count}")
+            print(f"T3: Passed. Samples until thresold changed: {count}")
             T3 = GREEN + "PASSED" + RESET
         else:
-            print(f"T3: Not Passed. Samples: {count}")
+            print(f"T3: Not Passed. Samples until threshold changed: {count}")
             T3 = RED + "NOT PASSED" + RESET
 
         # Test 4
         print("Test 4: Verifying error paths and fast sampling at 1ms")
+        write_return = write_config(SYSFS_PATH + "mod", NOISY_MODE)
         write_config(CONFIG_PATHS["threshold_mc"], 45000)
         write_config(CONFIG_PATHS["mode"], RAMP_MODE)
-        write_config(CONFIG_PATHS["sampling_mc"], 100)
+        write_config(CONFIG_PATHS["sampling_mc"], 1)
         count = print_sample_test(4, ep, fd)
-        write_return = write_config(SYSFS_PATH + "mod", NOISY_MODE)
+        
         if(write_return == -errno.EINVAL and count <= 1100 and count >= 900):
-            print(f"T4: Passed. Samples: {count}/s. Write reterned {write_return} expected {-errno.EINVAL}")
+            print(f"T4: Passed. Samples: {count}/s. Write returned {write_return} expected {-errno.EINVAL}(EINVAL)")
             T4 = GREEN + "PASSED" + RESET
         else:
             print(f"T4: Not Passed. Samples: {count}/s. Write returned {write_return} expected {-errno.EINVAL}")
