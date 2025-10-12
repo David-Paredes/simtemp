@@ -7,7 +7,7 @@ KERNEL_DEVICE="nxp_simtemp"
 NORMAL_MODE="0"
 NOISY_MODE="1"
 RAMP_MODE="2"
-EXPECT_COMMAND_REGEX=".+command\s\(.exit"
+EXPECT_COMMAND_REGEX=".+command\s\('exit"
 
 # Function executed when exit is triggered
 cleanup_command() {
@@ -16,6 +16,7 @@ cleanup_command() {
     # Kill the python coprocess if exists
     if kill -0 "${PYTHON_PROC_PID}" 2>/dev/null; then
         kill "${PYTHON_PROC_PID}" 2>/dev/null
+        echo "Python coprocess PID ${PYTHON_PROC_PID} killed"
     fi
     wait "${PYTHON_PROC_PID}" 2>/dev/null
 
@@ -24,13 +25,14 @@ cleanup_command() {
     # Remove device if it's registered
     if lsmod | grep -q "$KERNEL_DEVICE"; then
         sudo rmmod $KERNEL_DEVICE
+        echo "${KERNEL_DEVICE} removed"
     fi
 }
 
 # Function to send a command to the python script
 send_command() {
     local command_to_send="$1"
-    echo "$command_to_send" >&$PYTHON_IN
+    echo "$command_to_send" >&"${PYTHON_PROC[1]}"
 }
 
 # Trap the EXIT signal to run the cleanup_command function
@@ -39,6 +41,22 @@ trap cleanup_command EXIT
 ./build.sh
 
 case "$1" in
+    "test")
+        echo "Registering $KO_FILE in kernel"
+        if [ -f "$KO_FILE" ]; then
+            sudo insmod $KO_FILE
+        else
+            echo "The file '$KO_FILE' does not exist."
+            exit 1
+        fi
+
+        if [ ! -f "$PYTHON_FILE" ]; then
+            echo "The file '$PYTHON_FILE' does not exist."
+            exit 1
+        fi
+        
+        sudo python3 $PYTHON_FILE $1
+        ;;
     *)
         echo "Registering $KO_FILE in kernel"
         if [ -f "$KO_FILE" ]; then
@@ -53,10 +71,7 @@ case "$1" in
             exit 1
         fi
         #start the python script as a coprocess
-        coproc PYTHON_PROC { python3 $PYTHON_FILE }
-
-        #COPROC_IN is the python script's standard input
-        PYTHON_IN=${COPROC[1]}
+        coproc PYTHON_PROC { sudo python3 $PYTHON_FILE; }
 
         COMMAND_COUNT=0
 
@@ -67,13 +82,13 @@ case "$1" in
             fi
             if [[ $python_line =~ $EXPECT_COMMAND_REGEX ]]; then
                 if [[ $COMMAND_COUNT -eq 0 ]]; then
-                    send_command "Write sample_mc 500"
+                    send_command "Write sampling_mc 80"
                     COMMAND_COUNT=1
                 elif [[ $COMMAND_COUNT -eq 1 ]]; then
-                    send_command "Write threshold_mc 35000"
+                    send_command "Write threshold_mc 42000"
                     COMMAND_COUNT=2
                 elif [[ $COMMAND_COUNT -eq 2 ]]; then
-                    send_command "Write mode $NOISY_MODE"
+                    send_command "Write mode $NORMAL_MODE"
                     COMMAND_COUNT=3
                 elif [[ $COMMAND_COUNT -eq 3 ]]; then
                     sleep 5s
@@ -88,20 +103,5 @@ case "$1" in
             fi
         done
         ;;
-    test)
-        echo "Registering $KO_FILE in kernel"
-        if [ -f "$KO_FILE" ]; then
-            sudo insmod $KO_FILE
-        else
-            echo "The file '$KO_FILE' does not exist."
-            exit 1
-        fi
-
-        if [ ! -f "$PYTHON_FILE" ]; then
-            echo "The file '$PYTHON_FILE' does not exist."
-            exit 1
-        fi
-        
-        python3 $PYTHON_FILE "test"
-        ;;
+    
 esac
