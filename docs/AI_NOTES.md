@@ -1,0 +1,5 @@
+- 100ms task hrtimer linux kernel
+- platform driver bind with device tree. The variables to bind are sampling-ms and threshold-mC
+- how to create threads in python. One receives a value every n ms and the other expects a command from the user
+- how would you do a block diagram of the different modules in a kernel and user space interation of a misc device sampling temperature with a hrtimer configurable and user space reading the sample and configuring the timer with sysfs
+- shell run a python file and parse its output by line. Depending of the parsed data, send a command to the python file and parse its output again
