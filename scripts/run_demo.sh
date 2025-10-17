@@ -74,27 +74,39 @@ case "$1" in
         coproc PYTHON_PROC { sudo python3 $PYTHON_FILE; }
 
         COMMAND_COUNT=0
+        line_count=0
 
         while IFS= read -r python_line <&"${PYTHON_PROC[0]}"; do
             echo "Python: $python_line"
+            ((line_count++))
             if [[ $python_line == "Current Configuration:" ]]; then
                 echo "Python Script initialized"
             fi
             if [[ $python_line =~ $EXPECT_COMMAND_REGEX ]]; then
                 if [[ $COMMAND_COUNT -eq 0 ]]; then
-                    send_command "Write sampling_mc 80"
+                    send_command "Write sampling_mc 100"
                     COMMAND_COUNT=1
                 elif [[ $COMMAND_COUNT -eq 1 ]]; then
                     send_command "Write threshold_mc 42000"
                     COMMAND_COUNT=2
                 elif [[ $COMMAND_COUNT -eq 2 ]]; then
-                    send_command "Write mode $NORMAL_MODE"
+                    send_command "Write mode $RAMP_MODE"
                     COMMAND_COUNT=3
-                elif [[ $COMMAND_COUNT -eq 3 ]]; then
-                    sleep 5s
-                    send_command "exit"
-                    COMMAND_COUNT=4
+                elif [[ $COMMAND_COUNT -eq 4 ]]; then
+                    send_command "Write mode $NORMAL_MODE"
+                    COMMAND_COUNT=5
+                elif [[ $COMMAND_COUNT -eq 5 ]]; then
+                    send_command "Write threshold_mc 45000"
+                    COMMAND_COUNT=6
                 fi
+            fi
+            if [ $COMMAND_COUNT -eq 3 ] && [ $line_count -eq 450 ]; then
+                send_command "Write sampling_mc 200"
+                COMMAND_COUNT=4
+            fi
+            if [ $COMMAND_COUNT -eq 6 ] && [ $line_count -eq 600 ]; then
+                send_command "exit"
+                COMMAND_COUNT=7
             fi
             
             if [[ $python_line == "Program finished." ]]; then
