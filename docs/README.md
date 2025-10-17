@@ -11,3 +11,5 @@ Run steps:
 - make clean
 
 Links:
+Repo: https://github.com/David-Paredes/simtemp
+Video demo: https://github.com/David-Paredes/simtemp/blob/main/docs/unknown_2025.10.16-23.12.mp4
